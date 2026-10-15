@@ -1,0 +1,34 @@
+import { CATALOG, DISHES } from './catalog';
+import { type Preferences, type HistoryRow, type GenerationInput, type PlanContent, SLOT_NAMES, planContentSchema } from './model';
+export function eligibleDishes(p:Preferences){
+ const dislikes=p.dislikes.toLowerCase().split(/[,;\n]/).map(s=>s.trim()).filter(Boolean);
+ return CATALOG.filter(d=>!d.allergens.some(a=>p.allergies.includes(a)) && (p.diet!=='Vegetarian'||d.vegetarian) && (p.diet!=='Vegan'||d.vegan) && (!p.halal||d.halal) && !dislikes.some(s=>d.name.toLowerCase().includes(s)||d.ingredients.some(i=>i.includes(s))) && (p.foodAccess!=='Masak sendiri'||d.prep<=p.prepMinutes));
+}
+export function summarizeHistory(rows:HistoryRow[]){
+ const logged=rows.filter(r=>r.meals.length>0); const kcal=logged.filter(r=>r.calories!==null); const veg=logged.filter(r=>r.vegetables!==null); const bought=logged.filter(r=>r.boughtLunch!==null); const sleep=rows.filter(r=>r.sleepHours!==null); const steps=rows.filter(r=>r.steps!==null);
+ return {daysInWindow:14,foodDays:logged.length,mealsLogged:logged.reduce((n,r)=>n+r.meals.length,0),calorieDays:kcal.length,recordedAverageKcal:kcal.length?Math.round(kcal.reduce((n,r)=>n+r.calories!,0)/kcal.length):null,vegetableDays:veg.filter(r=>r.vegetables).length,vegetableObservedDays:veg.length,boughtLunchDays:bought.filter(r=>r.boughtLunch).length,boughtLunchObservedDays:bought.length,sleepNights:sleep.length,averageSleepHours:sleep.length?Math.round(sleep.reduce((n,r)=>n+r.sleepHours!,0)/sleep.length*10)/10:null,stepDays:steps.length,averageSteps:steps.length?Math.round(steps.reduce((n,r)=>n+r.steps!,0)/steps.length):null,firstDate:rows.at(0)?.date??null,lastDate:rows.at(-1)?.date??null};
+}
+export function assertReady(input:GenerationInput){
+ if(input.profile.allergyStatus==='unknown')throw new Error('Konfirmasi alergi terlebih dahulu sebelum membuat draf.');
+ if(input.profile.allergyStatus==='listed'&&!input.profile.allergies.length)throw new Error('Pilih setidaknya satu alergi.');
+ if(input.profile.allergyStatus==='none'&&input.profile.allergies.length)throw new Error('Status alergi tidak sesuai dengan daftar alergi.');
+ const dishes=eligibleDishes(input.profile);
+ for(const slot of SLOT_NAMES.slice(0,input.profile.mealsPerDay))if(!dishes.some(d=>d.slots.includes(slot)))throw new Error(`Pilihan ${slot.toLowerCase()} belum tersedia untuk batasan ini. Sesuaikan katalog atau tinjau preferensi.`);
+}
+export function validatePlan(content:unknown,input:GenerationInput):PlanContent{
+ const plan=planContentSchema.parse(content);const allowed=new Set(eligibleDishes(input.profile).map(d=>d.id)); const slots=SLOT_NAMES.slice(0,input.profile.mealsPerDay);
+ if(new Set(plan.days.map(d=>d.day)).size!==7)throw new Error('Rencana harus memiliki tujuh hari yang berbeda.');
+ for(const day of plan.days){if(day.meals.length!==slots.length||new Set(day.meals.map(m=>m.slot)).size!==slots.length||slots.some(s=>!day.meals.some(m=>m.slot===s)))throw new Error('Jadwal makan tidak lengkap.');for(const meal of day.meals){if(!allowed.has(meal.dishId)||!DISHES[meal.dishId]?.slots.includes(meal.slot))throw new Error('Menu tidak sesuai dengan katalog atau batasan pengguna.');}}
+ return {...plan,days:[...plan.days].sort((a,b)=>a.day-b.day)};
+}
+export function examplePlan(input:GenerationInput):PlanContent{
+ assertReady(input); const p=input.profile; const available=eligibleDishes(p);const h=summarizeHistory(input.history);const slots=SLOT_NAMES.slice(0,p.mealsPerDay);
+ const days=Array.from({length:7},(_,idx)=>({day:idx+1,meals:slots.map((slot,si)=>{const choices=available.filter(d=>d.slots.includes(slot)).sort((a,b)=>a.cost-b.cost);const affordable=choices.filter(d=>d.cost<=p.budget/p.mealsPerDay*1.15);const pool=affordable.length?affordable:choices;const dish=pool[(idx+si*2)%pool.length];return {slot,dishId:dish.id,servings:1,note:p.foodAccess==='Beli makanan'?'Pilih penjual yang dapat mengonfirmasi bahan dan alergennya.':`Siapkan sesuai porsi; waktu masak sekitar ${dish.prep} menit.`};})}));
+ return validatePlan({title:'Langkah kecil, makan lebih teratur',summary:`Contoh rencana tujuh hari untuk tujuan “${p.goal.toLowerCase()}”, dengan ${p.mealsPerDay} waktu makan per hari. Menu dipilih dari katalog contoh sesuai preferensi yang tersimpan.`,insights:[{source:'preferensi',observation:`Pola ${p.diet.toLowerCase()}, anggaran Rp${p.budget.toLocaleString('id-ID')}/hari, ${p.foodAccess.toLowerCase()}.`,adaptation:'Mengutamakan menu lokal yang dapat diganti satu per satu oleh pelatih.'},{source:'riwayat',observation:h.foodDays?`${h.foodDays}/14 hari memiliki catatan makan; ${h.boughtLunchDays}/${h.boughtLunchObservedDays} hari teramati membeli makan siang.`:'Belum ada catatan makan dalam jendela riwayat.',adaptation:h.foodDays?'Riwayat digunakan sebagai konteks kebiasaan, bukan ukuran seluruh asupan.':'Rencana awal menggunakan preferensi; kebiasaan pengguna belum dapat disimpulkan.'},...(input.instructions?[{source:'pelatih' as const,observation:input.instructions,adaptation:'Instruksi tersimpan untuk ditinjau pelatih. Mode contoh memakai aturan katalog dan belum menafsirkan instruksi bebas.'}]:[])],assumptions:['Ini contoh berbasis aturan, bukan hasil AI. Instruksi bebas dan target kalori belum dioptimalkan.','Nilai gizi dan biaya adalah estimasi katalog contoh. Verifikasi bahan, merek, serta kontaminasi silang saat meninjau.',...(h.foodDays<14?['Riwayat tidak lengkap; hari tanpa jurnal tidak dianggap tanpa makan.']:[])],days},input);
+}
+export function dayTotals(meals:PlanContent['days'][number]['meals']){return meals.reduce((t,m)=>{const d=DISHES[m.dishId];return {kcal:t.kcal+d.kcal*m.servings,protein:t.protein+d.protein*m.servings,carbs:t.carbs+d.carbs*m.servings,fat:t.fat+d.fat*m.servings,cost:t.cost+d.cost*m.servings};},{kcal:0,protein:0,carbs:0,fat:0,cost:0});}
+export function planWarnings(plan:PlanContent,p:Preferences,target:number|null){const warnings:string[]=[];if(plan.days.some(d=>dayTotals(d.meals).cost>p.budget))warnings.push('Ada hari yang melebihi anggaran harian. Tinjau menu atau porsinya.');if(target&&plan.days.some(d=>Math.abs(dayTotals(d.meals).kcal-target)/target>0.15))warnings.push('Ada hari dengan estimasi energi lebih dari 15% dari target pelatih. Tinjau porsi sebelum mengirim.');return warnings;}
+export const idr=(n:number)=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(n);
+export function dateAdd(date:string,days:number){const d=new Date(`${date}T12:00:00Z`);d.setUTCDate(d.getUTCDate()+days);return d.toISOString().slice(0,10);}
+export function localDate(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());}
+export const shortDate=(date:string)=>new Date(`${date}T12:00:00Z`).toLocaleDateString('id-ID',{day:'numeric',month:'short'});
