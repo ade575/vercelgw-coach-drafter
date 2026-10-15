@@ -84,3 +84,28 @@ npm run build
 ```
 
 Tests cover all three sample profiles, missing-data handling, unknown/contradictory allergies, allergen rejection of model output, duplicate days/slots, dietary filtering and date arithmetic.
+
+
+## Guided preference setup
+
+The user page now guides users through Keseharian, Pilihan makanan, Kepraktisan,
+and Harapan, with conditional follow-ups, section editing and final review.
+Progress is saved in a separate per-person questionnaireDraft when advancing or
+choosing Simpan & keluar. It does not replace the confirmed profile until
+Simpan preferensi untuk pelatih. Confirmation increments profileVersion, which
+makes previous coach drafts stale. Existing browser profiles and sent plans are
+preserved; the old profile remains the coach's baseline until new confirmation.
+
+Confirmed questionnaire answers are included in the coach summary, generation
+request and plan snapshot. Hard ingredient restrictions filter catalogue choices
+and are checked again per meal on generated/edited plans. Preferences and typical
+availability remain soft context. Ingredient matching supports the prototype's
+catalogue vocabulary; unsupported allergies block generation for catalogue review.
+Equipment, household context and other free text guide AI drafting but are not
+fully optimized by the local example generator. Unknown or partial budget context
+is sent explicitly; the older numeric budget remains an example-mode reference.
+
+No cross-device storage has been added. Answers on the current question are saved
+when advancing or explicitly saving; closing the browser before either action can
+lose those edits. Tests additionally cover branching, incomplete answers, budget
+normalization and enforcement of meal-specific ingredient limits.

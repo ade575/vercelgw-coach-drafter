@@ -2,7 +2,12 @@ import { z } from 'zod';
 export const SLOT_NAMES = ['Sarapan', 'Makan siang', 'Makan malam', 'Camilan'] as const;
 export type Slot = typeof SLOT_NAMES[number];
 export const ALLERGENS = ['Kacang tanah','Susu','Telur','Ikan','Kerang','Gandum','Kedelai'];
+export const answersSchema = z.record(z.string().max(60), z.union([z.string().max(1000),z.array(z.string().max(120)).max(30)]));
+export type Answers = z.infer<typeof answersSchema>;
+export const questionnaireSchema = z.object({answers:answersSchema,confirmedAt:z.string()});
+export const questionnaireDraftSchema = z.object({answers:answersSchema,step:z.number().int().min(-1).max(40),updatedAt:z.string()});
 export const profileSchema = z.object({
+  questionnaire: questionnaireSchema.optional(),
   goal: z.string().min(1).max(200), allergyStatus: z.enum(['none','listed','unknown']), allergies: z.array(z.string().max(80)).max(15),
   diet: z.enum(['Seimbang','Vegetarian','Vegan']), halal: z.boolean(), dislikes: z.string().max(500),
   budget: z.number().int().min(20000).max(500000), foodAccess: z.enum(['Campuran','Masak sendiri','Beli makanan']),
@@ -22,7 +27,7 @@ export const planContentSchema = z.object({
 });
 export type PlanContent = z.infer<typeof planContentSchema>;
 export type Plan = PlanContent & {id:string;createdAt:string;sentAt?:string;mode:'example'|'ai';profileVersion:number;profileSnapshot:Preferences;historySnapshot:HistoryRow[];brief:{instructions:string;calorieTarget:number|null;startDate:string};usage?:{inputTokens:number;outputTokens:number;reasoningTokens:number;model:string};reviewed:boolean};
-export type Person = {id:string;name:string;initials:string;color:string;subtitle:string;age:number;profile:Preferences;profileVersion:number;updatedAt:string;history:HistoryRow[];historySource:'sample'|'import';draft:Plan|null;sentPlans:Plan[]};
+export type Person = {id:string;name:string;initials:string;color:string;subtitle:string;age:number;profile:Preferences;profileVersion:number;updatedAt:string;questionnaireDraft?:z.infer<typeof questionnaireDraftSchema>;history:HistoryRow[];historySource:'sample'|'import';draft:Plan|null;sentPlans:Plan[]};
 export type Store = {version:1;selectedId:string;people:Person[]};
 export const generationSchema=z.object({profile:profileSchema,history:z.array(historyRowSchema).max(14),instructions:z.string().max(2000),calorieTarget:z.number().int().min(1000).max(4000).nullable(),startDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/)});
 export type GenerationInput=z.infer<typeof generationSchema>;
